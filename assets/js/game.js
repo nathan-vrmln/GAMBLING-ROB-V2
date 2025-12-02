@@ -568,7 +568,7 @@ function renderCollection(){
 			const imgEl = document.createElement(unlocked ? 'img' : 'div');
 			imgEl.className = 'card-thumb';
 			if (unlocked) {
-				imgEl.src = `assets/img/${fn}`;
+				imgEl.src = encodeURI(`assets/img/${fn}`);
 				imgEl.alt = imageMetaMap[fn]?.displayName || fn;
 			} // sinon div noir via CSS
 			const name = document.createElement('div');
@@ -676,7 +676,7 @@ function spawnUnlockShard(slotWrap, filename){
 	try {
 		const btn = document.getElementById('open-collection-btn');
 		if (!btn || !slotWrap || !filename) return;
-		const imgSrc = `assets/img/${filename}`;
+		const imgSrc = encodeURI(`assets/img/${filename}`);
 		// Point de départ: centre du slot
 		const startRect = slotWrap.getBoundingClientRect();
 		const startX = startRect.left + startRect.width / 2;
