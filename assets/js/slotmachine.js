@@ -5,23 +5,27 @@
  (function () {
 	const COLUMN_COUNT = 3;
 	const SPIN_MIN_DURATION = 1200; // durée minimale avant ralentissement
-	const STOP_DELAY_BETWEEN = 350; // délai entre arrêts successifs
+	const STOP_DELAY_BETWEEN = 350; // délai entre arrêts successifs (normal)
+	const STOP_DELAY_BETWEEN_ALLIN = 2000; // délai entre arrêts pour ALL IN
 	const INITIAL_INTERVAL = 40; // vitesse initiale (ms entre changements)
 	const SLOW_INTERVAL = 120; // vitesse quand ralentit
 	const containerId = 'slot-machine';
-	const IMAGE_BASE_PATH = 'assets/img/'; // chemin adapté (plus de sous-dossier slots/)
+	const IMAGE_BASE_PATH = 'assets/imgV2/'; // chemin adapté (plus de sous-dossier slots/)
 
 	let images = []; // liste des noms de fichiers (ex: 'imageA.png')
 	let preloaded = {}; // cache Image objects
 	let weights = null; // { filename: weight }
+	let __weightCache = null; // cache poids total pour pickRandom
 
 	function setImages(list) {
 		images = Array.isArray(list) ? list.slice() : [];
+		__weightCache = null; // Invalider cache
 		preloadImages();
 	}
 
 	function setImageWeights(map) {
 		weights = map || null;
+		__weightCache = null; // Invalider cache
 	}
 
 	function preloadImages() {
@@ -42,19 +46,20 @@
 
 	function pickRandom() {
 		if (images.length === 0) return null;
-		if (!weights) {
-			const idx = Math.floor(Math.random() * images.length);
-			return images[idx];
+		if (!weights) return images[Math.floor(Math.random() * images.length)];
+		
+		// Calculer le total une seule fois (lazy)
+		if (!__weightCache) {
+			__weightCache = 0;
+			for (const name of images) {
+				const w = Math.max(0, weights[name] || 0);
+				__weightCache += w;
+			}
 		}
-		let total = 0;
-		for (const name of images) {
-			const w = Math.max(0, weights[name] || 0);
-			total += w;
-		}
-		if (total <= 0) {
-			const idx = Math.floor(Math.random() * images.length);
-			return images[idx];
-		}
+		
+		let total = __weightCache;
+		if (total <= 0) return images[Math.floor(Math.random() * images.length)];
+		
 		let r = Math.random() * total;
 		for (const name of images) {
 			const w = Math.max(0, weights[name] || 0);
@@ -75,6 +80,60 @@
 		}
 		imgTag.src = encodeURI(IMAGE_BASE_PATH + filename);
 		imgTag.alt = filename;
+		
+		// Mettre à jour le nom de la carte en temps réel
+		updateCardNameLive(col, filename);
+	}
+	
+	function updateCardNameLive(col, filename) {
+		// Trouver le wrapper parent puis le slot-info
+		const wrapper = col.closest('.slot-wrapper');
+		if (!wrapper) return;
+		const info = wrapper.querySelector('.slot-info');
+		if (!info) return;
+		const nameSpan = info.querySelector('.slot-name');
+		const raritySpan = info.querySelector('.slot-rarity');
+		const familySpan = info.querySelector('.slot-family');
+		
+		// Récupérer les métadonnées de la carte
+		let displayName = filename;
+		let rarity = 1;
+		let rarityLabel = 'commun';
+		let family = null;
+		
+		try {
+			if (window.GameLogic && window.GameLogic.imageMetaMap && window.GameLogic.imageMetaMap[filename]) {
+				const meta = window.GameLogic.imageMetaMap[filename];
+				displayName = meta.displayName || filename;
+				rarity = meta.rarity || 1;
+				family = meta.family || null;
+				const rarityNames = {1:'commun',2:'rare',3:'épique',4:'légendaire',5:'mythique'};
+				rarityLabel = rarityNames[rarity] || 'commun';
+			}
+		} catch(e) {
+			console.warn('Erreur updateCardNameLive:', e);
+		}
+		
+		if (nameSpan) nameSpan.textContent = displayName;
+		if (raritySpan) {
+			raritySpan.textContent = rarityLabel;
+			raritySpan.className = 'slot-rarity rarity-' + rarity;
+		}
+		if (familySpan) {
+			const familyNames = {
+				'bebes': '👶', 'caillou': '💎', 'humainbizarre': '🤪', 'classe': '🎩',
+				'sexy': '💋', 'gigachad': '💪', 'oeuvres': '🎨', 'dodo': '😴',
+				'alcoliques': '🍺', 'snap': '📸', 'religieux': '✝️', 'bouffe': '🍴',
+				'sportifs': '⚽', 'rob': '🤖', 'dessins': '🖼️', 'meme': '😂',
+				'numerique': '💻', 'velo': '🚴', 'vacances': '🏖️', 'model3d': '🎭',
+				'toilettes': '🚽', 'cinema': '🎬', 'freaky': '👻', 'groupes': '👥',
+				'clash': '⚔️', 'paparazzis': '📷', 'autre': '❓'
+			};
+			const familyDisplay = family || 'autre';
+			const emoji = familyNames[familyDisplay] || '❓';
+			familySpan.textContent = emoji;
+			familySpan.title = familyDisplay;
+		}
 	}
 
 	// Anime une colonne jusqu'à l'arrêt et retourne la valeur finale
@@ -162,11 +221,25 @@
 			col.classList.remove('stopped','rarity-1','rarity-2','rarity-3','rarity-4','rarity-5');
 		});
 
+		// Utiliser le délai ALL IN si actif
+		const isAllIn = window.isAllInSpin || false;
+		const delayBetween = isAllIn ? STOP_DELAY_BETWEEN_ALLIN : STOP_DELAY_BETWEEN;
+
+		// Jouer le son de spin approprié
+		const audioFile = isAllIn ? 'assets/audio/spin-allin.mp3' : 'assets/audio/spin-normal.mp3';
+		const spinAudio = new Audio(audioFile);
+		spinAudio.volume = 0.6;
+		spinAudio.play().catch(e => console.warn('Spin sound error:', e));
+
 		const promises = columns.map((col, i) => {
-			const extraDelay = i * STOP_DELAY_BETWEEN;
+			const extraDelay = i * delayBetween;
 			return spinSingleColumn(col, SPIN_MIN_DURATION + extraDelay, i);
 		});
-		return Promise.all(promises);
+		
+		return Promise.all(promises).then(result => {
+			// Plus besoin d'arrêter le son car il dure exactement le temps du spin
+			return result;
+		});
 	}
 
 	// Expose API globale

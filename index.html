@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>GAMBLING ROB</title>
+	<title>GAMBLING ROBgit commit -m "Initial commit"</title>
 	<link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
@@ -18,7 +18,6 @@
 	<!-- Modal d'authentification -->
 	<div id="auth-overlay" class="auth-overlay">
 		<div class="auth-modal">
-			<h2 id="auth-title">Connexion</h2>
 			<div id="auth-error" class="auth-error" style="display:none;"></div>
 			<form id="auth-form" autocomplete="off">
 				<input type="text" id="auth-pseudo" placeholder="Pseudo" required minlength="3" maxlength="20" autocomplete="off" />
@@ -34,7 +33,8 @@
 
 	<!-- Contenu du jeu (caché jusqu'à connexion) -->
 	<div id="game-content" style="display:none;">
-	<header id="robions-display">Robions : 100</header>
+	<header id="robions-display"><span class="robions-text">100</span><img src="assets/images/robion.png" alt="Robion" class="robion-logo"></header>
+	<div id="last-result" style="display:none;"></div>
 	<div id="player-stats" class="player-stats"></div>
 	
 	<!-- Menu latéral gauche -->
@@ -87,11 +87,26 @@
 	</div>
 	<!-- Bouton Classement (haut droite, avant déconnexion) -->
 	<button id="open-leaderboard-btn" class="leaderboard-btn">🏆 Classement</button>
-	<!-- Bouton Déconnexion (haut droite) -->
+	<!-- Boutons Sauvegarde et Déconnexion (haut droite) -->
+	<button id="save-btn" class="save-btn">💾 Sauver</button>
 	<button id="logout-btn" class="logout-btn">Déconnexion</button>
 	<div id="current-username" class="current-username"></div>
 	<!-- Bouton Collection (haut gauche) -->
 	<button id="open-collection-btn" class="collection-btn">📚 Collection</button>
+
+	<!-- Menu boutique (droite) -->
+	<div id="shop-toggle" class="shop-toggle">
+		<span class="arrow">◄</span>
+	</div>
+	<div id="shop-sidebar" class="shop-sidebar">
+		<div class="shop-content">
+			<h3>🛒 Boutique</h3>
+			<div class="farm-module">
+				<h4>Boutique en construction...</h4>
+				<p style="color: #aaa; text-align: center; font-size: 14px;">Bientôt disponible !</p>
+			</div>
+		</div>
+	</div>
 
 	<!-- Overlay Classement -->
 	<div id="leaderboard-overlay" class="leaderboard-overlay" style="display:none;">
@@ -106,11 +121,16 @@
 		</div>
 	</div>
 
-	<!-- Overlay Collection plein écran -->
 	<div id="collection-overlay" class="collection-overlay" style="display:none;">
 		<div class="collection-header">
 			<h2>Collection</h2>
-			<button id="close-collection-btn" class="close-btn">✕</button>
+			<div style="display:flex; gap:10px; align-items:center;">
+				<label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+					<input type="checkbox" id="collection-family-toggle" style="width:18px; height:18px;">
+					<span style="font-size:14px;">Grouper par famille</span>
+				</label>
+				<button id="close-collection-btn" class="close-btn">✕</button>
+			</div>
 		</div>
 		<div id="collection-content" class="collection-content"></div>
 	</div>
@@ -201,22 +221,19 @@
 			const foundBgs = new Map();
 			const detectOne = (i) => new Promise(resolve => {
 				const extensions = ['jpg', 'jpeg', 'png'];
-				let remaining = extensions.length;
+				let remaining = 1; // Only check for 'jpg'
 				let resolved = false;
-				extensions.forEach(ext => {
-					const img = new Image();
-					img.onload = () => {
-						if (!resolved) {
-							resolved = true;
-							resolve({ num: i, ext });
-						}
-					};
-					img.onerror = () => {
-						remaining--;
-						if (remaining === 0 && !resolved) resolve(null);
-					};
-					img.src = `assets/fonds/${i}.${ext}?t=${Date.now()}`;
-				});
+				const img = new Image();
+				img.onload = () => {
+					if (!resolved) {
+						resolved = true;
+						resolve({ num: i, ext: 'jpg' }); // Only resolve with 'jpg'
+					}
+				};
+				img.onerror = () => {
+					resolve(null); // Resolve as null if the image fails to load
+				};
+				img.src = `assets/fonds/${i}.${remaining === 1 ? 'jpg' : 'jpeg'}?t=${Date.now()}`; // Only use 'jpg'
 			});
 			const tasks = [];
 			for (let i = 1; i <= 20; i++) tasks.push(detectOne(i));
@@ -239,6 +256,16 @@
 				document.body.classList.add('bg-image');
 				document.body.style.backgroundImage = `url('assets/fonds/${bgIndex}.${ext}?t=${Date.now()}')`;
 				console.log('Image chargée:', `assets/fonds/${bgIndex}.${ext}`);
+				// Fallback: remove background if the image fails to load
+				const bgImg = new Image();
+				bgImg.onload = () => {
+					console.log('Image chargée:', `assets/fonds/${bgIndex}.${ext}`);
+				};
+				bgImg.onerror = () => {
+					console.warn('Image', `assets/fonds/${bgIndex}.${ext}`, 'introuvable');
+					document.body.style.backgroundImage = 'none'; // Remove background on error
+				};
+				bgImg.src = `assets/fonds/${bgIndex}.${ext}`;
 			}
 		};
 		
@@ -281,7 +308,7 @@
 			window.userUnlockedCards = userData.unlockedCards || [];
 			window.farmSpeedLevel = userData.farmSpeedLevel || 0;
 			window.farmProductionLevel = userData.farmProductionLevel || 0;
-			window.farmProgress = userData.farmProgress || 0;
+			// farmProgress n'est plus chargé depuis Firebase (causes glitches)
 			window.userMultiplierLevel = userData.multiplierLevel || 0;
 			window.userRobcoinBalance = userData.robcoinBalance || 0;
 			// Déclencher une synchronisation forcée au premier spin après connexion
@@ -297,13 +324,14 @@
 		document.getElementById('auth-toggle-link').addEventListener('click', (e) => {
 			e.preventDefault();
 			isRegisterMode = !isRegisterMode;
+			const overlay = document.getElementById('auth-overlay');
 			if (isRegisterMode) {
-				document.getElementById('auth-title').textContent = 'Créer un compte';
+				overlay.classList.add('register-mode');
 				document.getElementById('auth-submit').textContent = "S'inscrire";
 				document.getElementById('auth-toggle-text').textContent = 'Déjà un compte ?';
 				document.getElementById('auth-toggle-link').textContent = 'Se connecter';
 			} else {
-				document.getElementById('auth-title').textContent = 'Connexion';
+				overlay.classList.remove('register-mode');
 				document.getElementById('auth-submit').textContent = 'Se connecter';
 				document.getElementById('auth-toggle-text').textContent = 'Pas de compte ?';
 				document.getElementById('auth-toggle-link').textContent = 'Créer un compte';
@@ -329,13 +357,13 @@
 					if (password.length < 6) throw new Error('Le mot de passe doit contenir au moins 6 caractères');
 					
 						await setDoc(doc(db, 'users', pseudo), {
-						pseudo, password, robions: 0, unlockedCards: [],
-						farmSpeedLevel: 0, farmProductionLevel: 0, farmProgress: 0,
-						multiplierLevel: 0, robcoinBalance: 0,
+					pseudo, password, robions: 0, unlockedCards: [],
+					farmSpeedLevel: 0, farmProductionLevel: 0,
+					multiplierLevel: 0, robcoinBalance: 0,
 						createdAt: new Date().toISOString()
 					});
 					localStorage.setItem('currentUserPseudo', pseudo);
-					loadUserData({ robions: 0, unlockedCards: [], farmSpeedLevel: 0, farmProductionLevel: 0, farmProgress: 0, multiplierLevel: 0, robcoinBalance: 0 }, pseudo);
+					loadUserData({ robions: 0, unlockedCards: [], farmSpeedLevel: 0, farmProductionLevel: 0, multiplierLevel: 0, robcoinBalance: 0 }, pseudo);
 				} else {
 					const userDoc = await getDoc(doc(db, 'users', pseudo));
 					if (!userDoc.exists()) throw new Error('Pseudo ou mot de passe incorrect');
@@ -354,6 +382,28 @@
 		});
 
 		// Gestion du bouton de déconnexion
+		const saveBtn = document.getElementById('save-btn');
+		if (saveBtn) {
+			saveBtn.addEventListener('click', async () => {
+				saveBtn.disabled = true;
+				saveBtn.textContent = '💾 Sauvegarde...';
+				// Sécurité: si la promesse ne résout pas, réinitialiser après 10s
+				const fallbackTimer = setTimeout(() => {
+					saveBtn.textContent = '⚠️ Réessayer';
+					saveBtn.disabled = false;
+				}, 10000);
+				try {
+					if (window.saveGameData) await window.saveGameData();
+					saveBtn.textContent = '✅ Sauvé';
+				} catch(e) {
+					saveBtn.textContent = '⚠️ Réessayer';
+				} finally {
+					clearTimeout(fallbackTimer);
+					setTimeout(() => { saveBtn.textContent = '💾 Sauver'; saveBtn.disabled = false; }, 1500);
+				}
+			});
+		}
+
 		document.getElementById('logout-btn').addEventListener('click', () => {
 			if (confirm('Voulez-vous vraiment vous déconnecter ?')) {
 				localStorage.removeItem('currentUserPseudo');
@@ -373,16 +423,28 @@
 		const leaderboardBtn = document.getElementById('open-leaderboard-btn');
 		const leaderboardOverlay = document.getElementById('leaderboard-overlay');
 		const closeLeaderboardBtn = document.getElementById('close-leaderboard-btn');
+		
+		// Mode de classement: 'robions' ou 'biggestAllIn'
+		let leaderboardMode = 'robions';
 
-		leaderboardBtn.addEventListener('click', async () => {
-			leaderboardOverlay.style.display = 'flex';
-			const content = document.getElementById('leaderboard-content');
-			content.innerHTML = '<div class="loading">Chargement...</div>';
-
-			try {
+	leaderboardBtn.addEventListener('click', async () => {
+		// Sauvegarder avant d'ouvrir pour avoir les données à jour
+		if (window.saveGameData) {
+			try { await window.saveGameData(); } catch(e) {}
+		}
+		leaderboardOverlay.style.display = 'flex';
+		loadLeaderboard();
+	});
+	
+	async function loadLeaderboard() {
+		const content = document.getElementById('leaderboard-content');
+		content.innerHTML = '<div class="loading">Chargement...</div>';			try {
 				const { collection, getDocs, query, orderBy, limit } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
 				const usersRef = collection(db, 'users');
-				const q = query(usersRef, orderBy('robions', 'desc'), limit(50));
+				
+				// Changer l'ordre selon le mode
+				const sortField = leaderboardMode === 'robions' ? 'robions' : 'biggestAllIn';
+				const q = query(usersRef, orderBy(sortField, 'desc'), limit(50));
 				const snapshot = await getDocs(q);
 
 				if (snapshot.empty) {
@@ -390,7 +452,9 @@
 					return;
 				}
 
-				let html = '<table class="leaderboard-table"><thead><tr><th>#</th><th>Pseudo</th><th>Robions</th><th>Cartes</th></tr></thead><tbody>';
+				// Changer l'en-tête selon le mode
+				const columnHeader = leaderboardMode === 'robions' ? 'Robions' : 'Biggest ALL IN';
+				let html = `<table class="leaderboard-table ${leaderboardMode === 'biggestAllIn' ? 'risk-mode' : ''}"><thead><tr><th>#</th><th>Joueur</th><th>${columnHeader}</th><th>Cartes</th></tr></thead><tbody>`;
 				let rank = 1;
 				let currentUserRank = null;
 				snapshot.forEach((doc) => {
@@ -400,8 +464,29 @@
 					let rowClass = isCurrentUser ? 'current-user' : '';
 					if (rank === 1) rowClass += ' first-place';
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
-					const robions = (data.robions || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-					html += `<tr class="${rowClass.trim()}"><td>${medal}</td><td>${data.pseudo || doc.id}</td><td>${robions}</td><td>${(data.unlockedCards || []).length}</td></tr>`;
+					
+					// Afficher selon le mode
+					const displayValue = leaderboardMode === 'robions' 
+						? (data.robions || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+						: (data.biggestAllIn || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+					
+					// Avatar du joueur - avec gestion des noms de fichiers encodés
+					let avatarHtml = '';
+					if (data.selectedAvatar) {
+						// Décoder le nom du fichier s'il est déjà encodé
+						const avatarFile = decodeURIComponent(data.selectedAvatar);
+						const avatarSrc = `assets/imgV2/${encodeURIComponent(avatarFile)}`;
+						avatarHtml = `<img src="${avatarSrc}" class="player-avatar" alt="Avatar" onerror="this.style.background='#000'">`;
+					} else {
+						avatarHtml = '<div class="player-avatar" style="background:#000;"></div>';
+					}
+					
+					html += `<tr class="${rowClass.trim()}">
+						<td>${medal}</td>
+						<td><div class="player-name-cell">${avatarHtml}<span>${data.pseudo || doc.id}</span></div></td>
+						<td>${displayValue}</td>
+						<td>${(data.unlockedCards || []).length}</td>
+					</tr>`;
 					rank++;
 				});
 				html += '</tbody></table>';
@@ -415,7 +500,38 @@
 				console.error('Erreur chargement classement:', error);
 				content.innerHTML = '<div class="error">Erreur de chargement</div>';
 			}
+		}
+		
+		// Bouton pour basculer le mode de classement
+		const leaderboardModeBtn = document.createElement('button');
+		leaderboardModeBtn.id = 'leaderboard-mode-toggle';
+		leaderboardModeBtn.className = 'leaderboard-mode-btn';
+		leaderboardModeBtn.textContent = 'Biggest ALL IN';
+		leaderboardModeBtn.style.cssText = 'position:absolute; top:50%; transform:translateY(-50%); right:80px; padding:6px 14px; background:rgba(255,64,64,0.15); color:#ff4040; border:1px solid rgba(255,64,64,0.4); border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.3s ease; backdrop-filter:blur(4px);';
+		
+		leaderboardModeBtn.addEventListener('click', () => {
+			if (leaderboardMode === 'robions') {
+				leaderboardMode = 'biggestAllIn';
+				leaderboardModeBtn.textContent = 'Robions';
+				leaderboardModeBtn.style.background = 'rgba(122,54,200,0.15)';
+				leaderboardModeBtn.style.color = '#ad4cff';
+				leaderboardModeBtn.style.borderColor = 'rgba(173,76,255,0.4)';
+			} else {
+				leaderboardMode = 'robions';
+				leaderboardModeBtn.textContent = 'Biggest ALL IN';
+				leaderboardModeBtn.style.background = 'rgba(255,64,64,0.15)';
+				leaderboardModeBtn.style.color = '#ff4040';
+				leaderboardModeBtn.style.borderColor = 'rgba(255,64,64,0.4)';
+			}
+			loadLeaderboard();
 		});
+		
+		// Ajouter le bouton au header du leaderboard
+		const leaderboardHeader = document.querySelector('.leaderboard-header');
+		if (leaderboardHeader) {
+			leaderboardHeader.style.position = 'relative';
+			leaderboardHeader.appendChild(leaderboardModeBtn);
+		}
 
 		closeLeaderboardBtn.addEventListener('click', () => {
 			leaderboardOverlay.style.display = 'none';
@@ -437,6 +553,15 @@
 			sidebarToggle.classList.toggle('open');
 		});
 
+		// Toggle boutique (droite)
+		const shopToggle = document.getElementById('shop-toggle');
+		const shopSidebar = document.getElementById('shop-sidebar');
+		
+		shopToggle.addEventListener('click', () => {
+			shopSidebar.classList.toggle('open');
+			shopToggle.classList.toggle('open');
+		});
+
 		// Fonction d'initialisation des modules
 		function initModules() {
 			// === FARM MODULE (SIMPLIFIÉ) ===
@@ -448,14 +573,14 @@
 			window.farmSpeedLevel = farmSpeedLevel;
 			window.farmProductionLevel = farmProductionLevel;
 			
-			const FARM_BASE_TIME = 60000, FARM_MIN_TIME = 1000, FARM_MAX_PRODUCTION = 50, FARM_BASE_COST = 10;
+			const FARM_BASE_TIME = 60000, FARM_MIN_TIME = 1000, FARM_MAX_PRODUCTION = 250, FARM_BASE_COST = 10;
 			
-			const getFarmTime = () => Math.max(FARM_MIN_TIME, FARM_BASE_TIME * Math.pow(0.95, farmSpeedLevel));
-			const getFarmProduction = () => Math.min(FARM_MAX_PRODUCTION, 1 + farmProductionLevel);
+			const getFarmTime = () => Math.max(FARM_MIN_TIME, FARM_BASE_TIME * Math.pow(0.95, window.farmSpeedLevel || 0));
+			const getFarmProduction = () => Math.floor(Math.min(FARM_MAX_PRODUCTION, (1 + (window.farmProductionLevel || 0)) * 5));
 			const getUpgradeCost = (level) => Math.floor(FARM_BASE_COST * Math.pow(1.3, level));
-			const getRobions = () => window.robions ?? robions ?? 0;
-			const setRobions = (value) => { if (window.robions !== undefined) window.robions = value; else robions = value; };
-			const isFarmActive = () => (farmSpeedLevel > 0 || farmProductionLevel > 0) && !!window.hasDoneFirstSpin;
+			const getRobions = () => window.robions || 0;
+			const setRobions = (value) => { window.robions = value; };
+			const isFarmActive = () => ((window.farmSpeedLevel || 0) > 0 || (window.farmProductionLevel || 0) > 0) && !!window.hasDoneFirstSpin;
 			
 			function showRobionsGain(amount) {
 				const gainEl = document.createElement('div');
@@ -469,10 +594,10 @@
 				const timeSeconds = (getFarmTime() / 1000).toFixed(1);
 				document.getElementById('farm-production').textContent = getFarmProduction();
 				document.getElementById('farm-speed').textContent = isFarmActive() ? timeSeconds : '--';
-				document.getElementById('speed-cost').textContent = getUpgradeCost(farmSpeedLevel);
-				document.getElementById('production-cost').textContent = getUpgradeCost(farmProductionLevel);
-				document.getElementById('speed-level').textContent = farmSpeedLevel;
-				document.getElementById('production-level').textContent = farmProductionLevel;
+				document.getElementById('speed-cost').textContent = getUpgradeCost(window.farmSpeedLevel || 0);
+				document.getElementById('production-cost').textContent = getUpgradeCost(window.farmProductionLevel || 0);
+				document.getElementById('speed-level').textContent = window.farmSpeedLevel || 0;
+				document.getElementById('production-level').textContent = window.farmProductionLevel || 0;
 				
 				const currentRobions = getRobions();
 				document.getElementById('farm-upgrade-speed').disabled = currentRobions < getUpgradeCost(farmSpeedLevel) || getFarmTime() <= FARM_MIN_TIME;
@@ -480,6 +605,17 @@
 			}
 			
 			window.updateFarmDisplay = updateFarmDisplay;
+			
+			// Fonction pour mettre à jour les niveaux ferme depuis Firebase
+			window.updateFarmLevels = function() {
+				farmSpeedLevel = window.farmSpeedLevel || 0;
+				farmProductionLevel = window.farmProductionLevel || 0;
+				updateFarmDisplay();
+				// Relancer la ferme si active
+				if (isFarmActive() && !farmInterval) {
+					startFarmProgress();
+				}
+			};
 			
 			function stopFarmProgress() {
 				if (farmInterval) {
@@ -517,10 +653,10 @@
 					
 					if (progress >= 1) {
 						const production = getFarmProduction();
-						setRobions(getRobions() + production);
+						setRobions(Math.floor(getRobions() + production));
 						showRobionsGain(production);
 						if (window.updateRobionsDisplay) window.updateRobionsDisplay();
-						if (window.saveGameData) window.saveGameData();
+						if (window.requestSaveGameData) window.requestSaveGameData();
 						// Relancer un nouveau cycle
 						startFarmProgress();
 					}
@@ -528,34 +664,32 @@
 			}
 			
 			document.getElementById('farm-upgrade-speed').addEventListener('click', () => {
-				const cost = getUpgradeCost(farmSpeedLevel);
+				const cost = getUpgradeCost(window.farmSpeedLevel || 0);
 				if (getRobions() >= cost && getFarmTime() > FARM_MIN_TIME) {
 					setRobions(getRobions() - cost);
-					farmSpeedLevel++;
+					window.farmSpeedLevel = (window.farmSpeedLevel || 0) + 1;
+					farmSpeedLevel = window.farmSpeedLevel;
 					window.farmSpeedLevel = farmSpeedLevel;
 					if (window.updateRobionsDisplay) window.updateRobionsDisplay();
 					if (window.saveGameData) window.saveGameData();
 					updateFarmDisplay();
-					// Relancer la ferme à zéro après amélioration
-					startFarmProgress();
+					// Ne pas relancer la ferme, laisser le cycle actuel continuer
 				}
 			});
 			
 			document.getElementById('farm-upgrade-production').addEventListener('click', () => {
-				const cost = getUpgradeCost(farmProductionLevel);
+				const cost = getUpgradeCost(window.farmProductionLevel || 0);
 				if (getRobions() >= cost && getFarmProduction() < FARM_MAX_PRODUCTION) {
 					setRobions(getRobions() - cost);
-					farmProductionLevel++;
-					window.farmProductionLevel = farmProductionLevel;
-					if (window.updateRobionsDisplay) window.updateRobionsDisplay();
-					if (window.saveGameData) window.saveGameData();
-					updateFarmDisplay();
-					// Relancer la ferme à zéro après amélioration
-					startFarmProgress();
-				}
-			});
-			
-			// Hook pour reset lors du rechargement utilisateur
+					window.farmProductionLevel = (window.farmProductionLevel || 0) + 1;
+					farmProductionLevel = window.farmProductionLevel;
+				window.farmProductionLevel = farmProductionLevel;
+				if (window.updateRobionsDisplay) window.updateRobionsDisplay();
+				if (window.saveGameData) window.saveGameData();
+				updateFarmDisplay();
+				// Ne pas relancer la ferme, laisser le cycle actuel continuer
+			}
+		});			// Hook pour reset lors du rechargement utilisateur
 			window.resetFarmStateOnUserReload = function() {
 				stopFarmProgress();
 				farmSpeedLevel = window.farmSpeedLevel || 0;
@@ -567,13 +701,14 @@
 			// Fonction pour démarrer la ferme après le premier spin
 			window.startFarmAfterFirstSpin = function() {
 				updateFarmDisplay();
-				startFarmProgress();
+				if (!farmInterval) {
+					startFarmProgress();
+				}
 			};
 			
-			// Initialisation au chargement
+			// Initialisation au chargement (seulement affichage, pas de démarrage)
 			setTimeout(() => {
 				updateFarmDisplay();
-				startFarmProgress();
 			}, 500);
 			
 			// === MULTIPLIER MODULE ===

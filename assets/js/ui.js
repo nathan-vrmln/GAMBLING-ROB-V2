@@ -21,7 +21,7 @@ function buildUI() {
 			col.appendChild(imgTag);
 			const info = document.createElement('div');
 			info.className = 'slot-info';
-			info.innerHTML = '<span class="slot-name"></span><span class="slot-rarity"></span>';
+			info.innerHTML = '<span class="slot-name"></span><span class="slot-rarity"></span><span class="slot-family"></span>';
 			wrapper.appendChild(col);
 			wrapper.appendChild(info);
 			slotRoot.appendChild(wrapper);
