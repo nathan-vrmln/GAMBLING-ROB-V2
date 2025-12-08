@@ -468,8 +468,11 @@ async function initGame() {
 	const overlay = document.getElementById('collection-overlay');
 	if (openBtn && overlay) {
 		openBtn.addEventListener('click', async () => {
-			// Recharger les données avant d'ouvrir la collection pour afficher les dernières cartes
-			await reloadGameData();
+			// Recharger les données seulement si pas de déblocage récent (< 3 secondes)
+			const timeSinceUnlock = window.lastUnlockTime ? (Date.now() - window.lastUnlockTime) : Infinity;
+			if (timeSinceUnlock > 3000) {
+				await reloadGameData();
+			}
 			overlay.style.display = 'block';
 			openBtn.classList.add('hidden');
 			renderCollection();
@@ -763,18 +766,24 @@ async function applySpinResult(resultArray) {
 	let stakeResult;
 	if (bet === 0) {
 		stakeResult = { refund: 0, bonus: 0, net: 0, lost: false };
+	} else if (hasSpecialEvent) {
+		// RÈGLE PRIORITAIRE: Si événement spécial, toujours gagner (même avec 3 communes)
+		let stakeMultiplier = calculateStakeMultiplier(resultArray);
+		// Si le multiplicateur serait une perte ou neutre, forcer à 1.26 (gain minimal)
+		if (stakeMultiplier <= NEUTRAL_THRESHOLD) {
+			stakeMultiplier = 1.26;
+		}
+		const bonus = Math.floor(bet * stakeMultiplier);
+		stakeResult = { refund: bet, bonus, net: bonus, lost: false };
 	} else if (winSum < 1) {
-		// Perte
+		// Perte (seulement si pas d'événement spécial)
 		stakeResult = { refund: 0, bonus: 0, net: -bet, lost: true };
 	} else if (winSum === 1) {
 		// Remboursement
 		stakeResult = { refund: bet, bonus: 0, net: 0, lost: false };
 	} else {
-		// Gain : utiliser stakeMultiplier pour déterminer le montant du gain
+		// Gain normal
 		let stakeMultiplier = calculateStakeMultiplier(resultArray);
-		if (hasSpecialEvent && stakeMultiplier <= NEUTRAL_THRESHOLD) {
-			stakeMultiplier = 1.26;
-		}
 		const bonus = Math.floor(bet * stakeMultiplier);
 		stakeResult = { refund: bet, bonus, net: bonus, lost: false };
 	}
@@ -871,10 +880,12 @@ async function applySpinResult(resultArray) {
 	// Marquer cartes tirées comme débloquées et afficher "nouvelle carte" pour les premières fois
 	const wrappers = document.querySelectorAll('#slot-machine .slot-wrapper');
 	const newlyCompletedFamilies = [];
+	let hasNewUnlocks = false;
 	resultArray.forEach((fn, idx) => {
 		const wasUnlocked = unlockedCards.has(fn);
 		unlockedCards.add(fn);
 		if (!wasUnlocked) {
+			hasNewUnlocks = true;
 			// Vérifier si cette carte complète une famille
 			const family = imageMetaMap[fn]?.family;
 			if (family) {
@@ -897,6 +908,13 @@ async function applySpinResult(resultArray) {
 			}
 		}
 	});
+	
+	// Synchroniser window.userUnlockedCards immédiatement avec le Set local
+	if (hasNewUnlocks) {
+		window.userUnlockedCards = Array.from(unlockedCards);
+		// Marquer qu'on vient de débloquer des cartes (pour éviter reload prématuré)
+		window.lastUnlockTime = Date.now();
+	}
 	
 	// Jouer le son de famille complète si applicable
 	if (newlyCompletedFamilies.length > 0 && window.familyCompleteSound) {
