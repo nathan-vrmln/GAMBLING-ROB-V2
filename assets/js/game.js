@@ -12,11 +12,155 @@ function getCachedElement(id) {
 
 // ===== VARIABLES GLOBALES =====
 let robions = 0; // crédits de départ par défaut
-// Exposer robions sur window pour synchronisation avec modules
+
+// Sécurité anti-cheat : sceller robions avec validation
+let __robionsChecksum = 0;
+function __updateChecksum() {
+	__robionsChecksum = robions * 7919 + 31337; // Hash simple
+}
+function __validateRobions() {
+	const expected = robions * 7919 + 31337;
+	if (__robionsChecksum !== expected) {
+		console.error('[ANTI-CHEAT] Robions modifiés illégalement détectés!');
+		// Restaurer depuis localStorage
+		const stored = localStorage.getItem('robions');
+		if (stored) {
+			robions = parseInt(stored, 10) || 0;
+			__updateChecksum();
+		}
+		return false;
+	}
+	return true;
+}
+
+// Exposer robions sur window avec protection anti-modification
 Object.defineProperty(window, 'robions', {
-	get: () => robions,
-	set: (val) => { robions = val; }
+	get: () => {
+		__validateRobions();
+		return robions;
+	},
+	set: (val) => {
+		// Bloquer modifications directes depuis console
+		const stack = new Error().stack;
+		if (stack && !stack.includes('game.js') && !stack.includes('ui.js')) {
+			console.warn('[ANTI-CHEAT] Tentative de modification robions bloquée');
+			return;
+		}
+		robions = val;
+		__updateChecksum();
+	}
 });
+
+// Fonction interne sécurisée pour changer robions
+function setRobions(newValue) {
+	robions = newValue;
+	__updateChecksum();
+	if (window.updateRobionsDisplay) window.updateRobionsDisplay();
+}
+
+// ===== SYSTÈME DE MUSAIN =====
+let musainMultiplier = 1;
+let musainTimeRemaining = 0;
+let musainInterval = null;
+let musainSpawnerInterval = null;
+const MUSAIN_IMG_PATH = 'assets/images/musain.png';
+const MUSAIN_BOOST_DURATION = 20; // 20 secondes
+const MUSAIN_FALL_DURATION = 4000; // 4 secondes pour tomber
+const MUSAIN_AUTO_SPAWN_MIN = 5000; // 5 sec minimum (TEST)
+const MUSAIN_AUTO_SPAWN_MAX = 8000; // 8 sec maximum (TEST)
+
+function spawnMusain() {
+	const musainEl = document.createElement('img');
+	musainEl.src = MUSAIN_IMG_PATH;
+	musainEl.className = 'musain-falling';
+	musainEl.style.position = 'fixed';
+	musainEl.style.left = Math.random() * (window.innerWidth - 80) + 'px';
+	musainEl.style.top = '0px';
+	musainEl.style.width = '80px';
+	musainEl.style.height = '80px';
+	musainEl.style.cursor = 'pointer';
+	musainEl.style.zIndex = '99999';
+	musainEl.style.pointerEvents = 'auto';
+	
+	document.body.appendChild(musainEl);
+	
+	// Animation de chute simple
+	let startTime = Date.now();
+	const fallAnimation = setInterval(() => {
+		const elapsed = Date.now() - startTime;
+		const progress = Math.min(elapsed / MUSAIN_FALL_DURATION, 1);
+		const newTop = progress * (window.innerHeight + 100);
+		
+		musainEl.style.top = newTop + 'px';
+		
+		if (progress >= 1) {
+			clearInterval(fallAnimation);
+			musainEl.remove();
+			scheduleNextMusainSpawn(); // Programmer le prochain
+		}
+	}, 30);
+	
+	// Clic sur le musain
+	musainEl.addEventListener('click', (e) => {
+		e.stopPropagation();
+		// Jouer le son musain
+		if (window.musainSound) {
+			window.musainSound.currentTime = 0;
+			window.musainSound.play().catch(() => {});
+		}
+		activateMusainBoost();
+		clearInterval(fallAnimation);
+		musainEl.remove();
+		scheduleNextMusainSpawn();
+	});
+}
+
+function activateMusainBoost() {
+	musainMultiplier = 2;
+	musainTimeRemaining = MUSAIN_BOOST_DURATION;
+	updateMusainDisplay();
+	
+	if (musainInterval) clearInterval(musainInterval);
+	musainInterval = setInterval(() => {
+		musainTimeRemaining--;
+		updateMusainDisplay();
+		
+		if (musainTimeRemaining <= 0) {
+			musainMultiplier = 1;
+			clearInterval(musainInterval);
+			musainInterval = null;
+			updateMusainDisplay();
+		}
+	}, 1000);
+}
+
+function updateMusainDisplay() {
+	const display = document.getElementById('musain-timer');
+	if (display) {
+		if (musainTimeRemaining > 0) {
+			display.textContent = `×${musainMultiplier} ${musainTimeRemaining}s`;
+			display.style.display = 'block';
+		} else {
+			display.style.display = 'none';
+		}
+	}
+	if (window.updateRobionsDisplay) window.updateRobionsDisplay();
+}
+
+function scheduleNextMusainSpawn() {
+	if (musainSpawnerInterval) clearTimeout(musainSpawnerInterval);
+	// Spawn aléatoire entre 40-80 secondes
+	const delay = Math.random() * (MUSAIN_AUTO_SPAWN_MAX - MUSAIN_AUTO_SPAWN_MIN) + MUSAIN_AUTO_SPAWN_MIN;
+	console.log(`[MUSAIN] Scheduling spawn in ${delay}ms`);
+	musainSpawnerInterval = setTimeout(() => {
+		console.log(`[MUSAIN] Timeout fired! Spawning...`);
+		spawnMusain();
+	}, delay);
+}
+
+window.getMusainMultiplier = () => musainMultiplier;
+window.getMusainTimeRemaining = () => musainTimeRemaining;
+
 let imageFilenames = [];
 let imageMetaMap = {}; // { filename: { rarity, displayName, persons:[], adjective } }
 let isSpinning = false; // état pour empêcher spam
@@ -34,19 +178,24 @@ let biggestAllIn = 0; // Plus gros ALL IN réalisé par le joueur
 // ===== CONFIGURATION SYSTÈME DE MISE =====
 let bet = 0; // mise actuelle (stakes: 0,10,20,50,100,200,400...)
 const STAKE_LEVELS = [0, 10, 20, 50]; // puis doublement après 50
-// 3c=0.125 (perte), 1r+2c=2.0 (remboursement), 2r+1c=4.0 (gain), 1r=2.0 (gain), 2r=4.0 (gain), 3r=8.0 (gain), 1é=2.8 (gain)
+// 3c=0.125 (perte), 1r+2c=0.3 (remboursé), 1é+2c=0.6 (gain), 2r+1c=0.72 (gain), tout le reste=gain
 const RARITY_STAKE_MULTIPLIERS = {
+	0: 1.0,   // Denis (malus, 10% des cartes)
 	1: 0.5,   // commun (43.9% des cartes)
-	2: 2.0,   // rare (22.9% des cartes)
-	3: 1.4,   // épique (18.5% des cartes)
-	4: 2.8,   // légendaire (12.7% des cartes)
+	2: 1.2,   // rare (22.9% des cartes)
+	3: 2.4,   // épique (18.5% des cartes)
+	4: 3.0,   // légendaire (12.7% des cartes)
 	5: 10.0   // mythique (1.3% des cartes)
 };
-const LOSS_THRESHOLD = 0.5;
+const LOSS_THRESHOLD = 0.125;
 const NEUTRAL_THRESHOLD = 0.5;
 
+// ===== SYSTÈME DE MALUS DENIS =====
+let denisCount = 0; // nombre de Denis dans le tirage actuel
+let denisEffect = null; // { type: 'loss'|'percent', value: perte } ou null
+
 // ===== LISTE D'IMAGES PAR DÉFAUT (depuis imgV2) =====
-const defaultImageFilenames = ["abel bebe bebes 1.png","abel caillou caillou 2.png","abel cheveux humainbizarre 1.png","abel classe classe 1.png","abel cromagnon caillou 1.png","abel dessin dessins 3.png","abel dessinrose dessins 2.png","abel dodo dodo 1.png","abel femme sexy 4.png","abel giraffe humainbizarre 1.png","abel glitche humainbizarre 1.png","abel gris meme 1.png","abel mannequin gigachad 2.png","abel marcel sportifs 1.png","abel retourne humainbizarre 2.png","abel rio snap 2.png","abel robion rob 1.png","abel roi meme 2.png","abel sexe sexy 2.png","abel sunglass vacances 1.png","abel velo velo 2.png","abel webcam numerique 1.png","abel-charlie-mateo cordemerde groupes 1.png","abel-corentin-noa-mateo alapause groupes 2.png","abel-mael-charlie-mateo gangbites groupes 1.png","abel-mael-nathan film cinema 4.png","abel-noa-corentin-charlie conferencedemerde groupes 2.png","abel-noa-mael branquignolles groupes 1.png","angelo artiste oeuvres 2.png","angelo bebe bebes 1.png","angelo binouze alcoliques 1.png","angelo caillou caillou 3.png","angelo classe classe 1.png","angelo dodo1 dodo 1.png","angelo dodo2 dodo 2.png","angelo drip gigachad 1.png","angelo fisc gigachad 3.png","angelo glouglou bouffe 1.png","angelo japanesegirls sexy 5.png","angelo multivers humainbizarre 3.png","angelo robion rob 1.png","angelo-corentin film cinema 4.png","charlie bebesylvainrob bebes 2.png","charlie bitmoji humainbizarre 2.png","charlie classe classe 1.png","charlie croco 3.jpg","charlie dessin dessins 3.png","charlie fortnite model3d 3.png","charlie gida bouffe 1.png","charlie lockin gigachad 2.png","charlie paparazzi paparazzis 1.png","charlie sybau meme 4.png","charlie taga 3.jpg","charlie twin humainbizarre 2.png","charlie vodkprod paparazzis 4.jpg","charlie-abel soireenoa groupes 1.png","charlie-sleyze cantine groupes 1.png","corentin artiste oeuvres 2.png","corentin bebepirate bebes 4.png","corentin classe classe 1.png","corentin corenthiens oeuvres 3.png","corentin djelaba religieux 2.png","corentin gourmand bouffe 1.png","corentin hazborentin bebes 4.png","corentin judo sportifs 4.png","corentin minimoys oeuvres 3.png","corentin nasdass1 snap 1.png","corentin nasdass2 snap 3.png","corentin paparazzi paparazzis 1.png","corentin robion rob 2.png","corentin steeve humainbizarre 2.jpg","corentin zob toilettes 2.png","corentin-noa-angelo-charlie-mael journeesrobouvertes groupes.png","jules goat 3.jpg","mael 3D model3d 4.png","mael agora humainbizarre 2.jpg","mael artiste oeuvres 1.png","mael buzzcut humainbizarre 1.png","mael chad gigachad 1.png","mael chauve meme 2.png","mael classe classe 1.png","mael film cinema 4.png","mael freaky1 freaky 3.png","mael freaky2 freaky 1.png","mael goat gigachad 4.png","mael granini bouffe 3.png","mael grobion oeuvres 3.png","mael indien snap 1.png","mael ipadkid humainbizarre 1.png","mael louche humainbizarre 1.png","mael nu toilettes 1.png","mael pascontent snap 1.png","mael pdp oeuvres 4.png","mael porfolio model3d 4.png","mael retourne humainbizarre 3.png","mael robion rob 1.png","mael sigma gigachad 2.png","mael soiree alcoliques 1.png","mael webcam numerique 1.png","mael-charlie fusion humainbizarre 3.png","mael-mateo agora groupes 2.png","mateo alcool alcoliques 1.png","mateo bateau vacances 1.png","mateo beaugosse gigachad 1.png","mateo bkaka1 toilettes 2.png","mateo bkaka2 toilettes 2.png","mateo booking vacances 1.png","mateo caillou caillou 1.png","mateo classe classe 1.png","mateo coupe humainbizarre 1.png","mateo cromagnon caillou 1.png","mateo cv numerique 3.png","mateo dessin dessins 3.png","mateo dodo dodo 3.png","mateo flex gigachad 1.png","mateo freaky freaky 4.png","mateo glouglou bouffe 2.png","mateo marcel sportifs 1.png","mateo matrix numerique 3.png","mateo meuf sexy 1.png","mateo nucaca toilettes 4.png","mateo plage vacances 1.png","mateo robion rob 1.png","mateo stonks meme 3.png","mateo veloganzhou velo 1.png","mateo voleur snap 2.png","mateo-abel-noa redbullcar groupes 2.png","mateo-charlie film cinema 4.png","mateo-charlie-abel cordemais 3.jpg","mateo-mael keskifait groupes 2.png","mathis rip caillou 4.png","nathan classe classe 1.png","nathan dessin dessins 3.png","nathan fesse sexy 2.png","nathan jesus religieux 4.png","nathan mateo humainbizarre 1.png","nathan trentemoult vacances 3.png","noa aurafarm gigachad 1.png","noa classe classe 1.png","noa daronne meme 3.png","noa dodo dodo 2.png","noa goat toilettes 1.png","noa kipa religieux 3.png","noa paparazzi paparazzis 2.png","noa prince clash 3.png","noa robion rob 2.png","noa rouge meme 1.png","noa sunglass vacances 1.png","noa velo velo 3.png","noa-abel branquignolles groupes 1.png","noa-abel-mateo-sleyze gang groupes 1.png","noa-mael tdl groupes 1.png","noa-mael-charlie branquignolles groupes 1.png","tom fesse sexy 4.png","tom molosse clash 4.png","tom tobomrobion rob 5.png","tom velo velo 2.png"];
+const defaultImageFilenames = ["abel bebe bebes 1.png","abel caillou caillou 2.png","abel cheveux humainbizarre 1.png","abel classe classe 1.png","abel cromagnon caillou 1.png","abel dessin dessins 3.png","abel dessinrose dessins 2.png","abel dodo dodo 1.png","abel femme sexy 4.png","abel giraffe humainbizarre 1.png","abel glitche humainbizarre 1.png","abel gris meme 1.png","abel mannequin gigachad 2.png","abel marcel sportifs 1.png","abel retourne humainbizarre 2.png","abel rio snap 2.png","abel robion rob 1.png","abel roi meme 2.png","abel sexe sexy 2.png","abel sunglass vacances 1.png","abel velo velo 2.png","abel webcam numerique 1.png","abel-charlie-mateo cordemerde groupes 1.png","abel-corentin-noa-mateo alapause groupes 2.png","abel-mael-charlie-mateo gangbites groupes 1.png","abel-mael-nathan film cinema 4.png","abel-noa-corentin-charlie conferencedemerde groupes 2.png","abel-noa-mael branquignolles groupes 1.png","angelo artiste oeuvres 2.png","angelo bebe bebes 1.png","angelo binouze alcoliques 1.png","angelo caillou caillou 3.png","angelo classe classe 1.png","angelo dodo1 dodo 1.png","angelo dodo2 dodo 2.png","angelo drip gigachad 1.png","angelo fisc gigachad 3.png","angelo glouglou bouffe 1.png","angelo japanesegirls sexy 5.png","angelo multivers humainbizarre 3.png","angelo robion rob 1.png","angelo-corentin film cinema 4.png","charlie bebesylvainrob bebes 2.png","charlie bitmoji humainbizarre 2.png","charlie classe classe 1.png","charlie croco 3.jpg","charlie dessin dessins 3.png","charlie fortnite model3d 3.png","charlie gida bouffe 1.png","charlie lockin gigachad 2.png","charlie paparazzi paparazzis 1.png","charlie sybau meme 4.png","charlie taga 3.jpg","charlie twin humainbizarre 2.png","charlie vodkprod paparazzis 4.jpg","charlie-abel soireenoa groupes 1.png","charlie-sleyze cantine groupes 1.png","corentin artiste oeuvres 2.png","corentin bebepirate bebes 4.png","corentin classe classe 1.png","corentin corenthiens oeuvres 3.png","corentin djelaba religieux 2.png","corentin gourmand bouffe 1.png","corentin hazborentin bebes 4.png","corentin judo sportifs 4.png","corentin minimoys oeuvres 3.png","corentin nasdass1 snap 1.png","corentin nasdass2 snap 3.png","corentin paparazzi paparazzis 1.png","corentin robion rob 2.png","corentin steeve humainbizarre 2.jpg","corentin zob toilettes 2.png","corentin-noa-angelo-charlie-mael journeesrobouvertes groupes.png","denis 0.png","jules goat 3.jpg","mael 3D model3d 4.png","mael agora humainbizarre 2.jpg","mael artiste oeuvres 1.png","mael buzzcut humainbizarre 1.png","mael chad gigachad 1.png","mael chauve meme 2.png","mael classe classe 1.png","mael film cinema 4.png","mael freaky1 freaky 3.png","mael freaky2 freaky 1.png","mael goat gigachad 4.png","mael granini bouffe 3.png","mael grobion oeuvres 3.png","mael indien snap 1.png","mael ipadkid humainbizarre 1.png","mael louche humainbizarre 1.png","mael nu toilettes 1.png","mael pascontent snap 1.png","mael pdp oeuvres 4.png","mael porfolio model3d 4.png","mael retourne humainbizarre 3.png","mael robion rob 1.png","mael sigma gigachad 2.png","mael soiree alcoliques 1.png","mael webcam numerique 1.png","mael-charlie fusion humainbizarre 3.png","mael-mateo agora groupes 2.png","mateo alcool alcoliques 1.png","mateo bateau vacances 1.png","mateo beaugosse gigachad 1.png","mateo bkaka1 toilettes 2.png","mateo bkaka2 toilettes 2.png","mateo booking vacances 1.png","mateo caillou caillou 1.png","mateo classe classe 1.png","mateo coupe humainbizarre 1.png","mateo cromagnon caillou 1.png","mateo cv numerique 3.png","mateo dessin dessins 3.png","mateo dodo dodo 3.png","mateo flex gigachad 1.png","mateo freaky freaky 4.png","mateo glouglou bouffe 2.png","mateo marcel sportifs 1.png","mateo matrix numerique 3.png","mateo meuf sexy 1.png","mateo nucaca toilettes 4.png","mateo ia vacances 3.png","mateo robion rob 1.png","mateo stonks meme 3.png","mateo veloganzhou velo 1.png","mateo voleur snap 2.png","mateo-abel-noa redbullcar groupes 2.png","mateo-charlie film cinema 4.png","mateo-charlie-abel cordemais 3.jpg","mateo-mael keskifait groupes 2.png","mathis rip caillou 4.png","nathan classe classe 1.png","nathan dessin dessins 3.png","nathan fesse sexy 2.png","nathan jesus religieux 4.png","nathan mateo humainbizarre 1.png","nathan trentemoult vacances 3.png","noa aurafarm gigachad 1.png","noa classe classe 1.png","noa daronne meme 3.png","noa dodo dodo 2.png","noa goat toilettes 1.png","noa kipa religieux 3.png","noa paparazzi paparazzis 2.png","noa prince clash 3.png","noa robion rob 2.png","noa rouge meme 1.png","noa sunglass vacances 1.png","noa velo velo 3.png","noa-abel branquignolles groupes 1.png","noa-abel-mateo-sleyze gang groupes 1.png","noa-mael tdl groupes 1.png","noa-mael-charlie branquignolles groupes 1.png","tom fesse sexy 4.png","tom molosse clash 4.png","tom tobomrobion rob 5.png","tom velo velo 2.png"];
 
 // ===== UTILITAIRES =====
 const allowedExt = ['.png','.jpg','.jpeg','.gif','.webp'];
@@ -61,6 +210,27 @@ function formatNumber(num) {
 }
 
 // ===== SYSTÈME DE MISE =====
+// Nouveau système simple : somme des raretés
+const RARITY_WIN_VALUES = {
+	0: -100, // Denis (malus très négatif, trigger les pénalités)
+	1: 0,    // commun
+	2: 1,    // rare
+	3: 2,    // épique
+	4: 10,   // légendaire
+	5: 50    // mythique
+};
+
+function calculateWinStatus(resultArray) {
+	let sum = 0;
+	resultArray.forEach(fn => {
+		const meta = imageMetaMap[fn];
+		const rarity = meta?.rarity || 1;
+		sum += (RARITY_WIN_VALUES[rarity] ?? 0);
+	});
+	// sum < 1 = perte, = 1 = remboursé, > 1 = gain
+	return sum;
+}
+
 function calculateStakeMultiplier(resultArray) {
 	let product = 1;
 	resultArray.forEach(fn => {
@@ -91,12 +261,12 @@ function parseImageMeta(filename) {
 	const noExt = filename.replace(/\.[^.]+$/, '');
 	const parts = noExt.split(/\s+/).filter(Boolean);
 	
-	// La rareté est toujours le dernier token (1-5 décimal)
+	// La rareté est toujours le dernier token (0-5 décimal)
 	let rarity = 3; // défaut
 	if (parts.length > 0) {
 		const lastPart = parts[parts.length - 1];
 		const r = parseInt(lastPart, 10);
-		if (Number.isInteger(r) && r >= 1 && r <= 5) {
+		if (Number.isInteger(r) && r >= 0 && r <= 5) {
 			rarity = r;
 			parts.pop(); // Retirer la rareté de la liste
 		}
@@ -125,16 +295,12 @@ function parseImageMeta(filename) {
 	const displayName = [persons.join('-'), adjective].filter(Boolean).join(' ')
 		|| noExt;
 	
-	// Log pour debug (première image seulement)
-	if (filename === 'abel bebe bebes 1.png') {
-		console.log(`[parseImageMeta] ${filename}:`, { rarity, displayName, family, parts });
-	}
-	
 	return { rarity, displayName, persons, adjective, family };
 }
 
 function rarityToWeight(r) {
 	switch (r) {
+		case 0: return 1000;  // Denis (double fréquence)
 		case 1: return 500;
 		case 2: return 300;
 		case 3: return 100;
@@ -144,9 +310,10 @@ function rarityToWeight(r) {
 	}
 }
 
-// Récompenses par rareté: 1→1, 2→2-3, 3→40-60, 4→400, 5→10000
+// Récompenses par rareté: 0→malus, 1→1, 2→2-3, 3→40-60, 4→400, 5→10000
 function rewardForRarity(r) {
 	switch (r) {
+		case 0: return 0; // Denis ne donne pas de robions, c'est un malus
 		case 1: return 1;
 		case 2: return 2 + Math.floor(Math.random() * 2);
 		case 3: return 40 + Math.floor(Math.random() * 21);
@@ -207,13 +374,27 @@ async function initGame() {
 	try {
 		lossNormalSound = new Audio('assets/audio/loose1.wav');
 		lossNormalSound.preload = 'auto';
-		lossNormalSound.volume = 1.0;
+		lossNormalSound.volume = 0.6; // Réduit de 40% (1.0 * 0.6 = 0.6)
 	} catch(e) {}
 	try {
 		familyCompleteSound = new Audio('assets/audio/family-complete.mp3');
 		familyCompleteSound.preload = 'auto';
 		familyCompleteSound.volume = 1.0;
 	} catch(e) {}
+	let denisScareSound = null;
+	try {
+		denisScareSound = new Audio('assets/audio/scare.mp3');
+		denisScareSound.preload = 'auto';
+		denisScareSound.volume = 1.0; // Max (déjà au max, +70% atteint la limite)
+	} catch(e) {}
+	let musainSound = null;
+	try {
+		musainSound = new Audio('assets/audio/musain.mp3');
+		musainSound.preload = 'auto';
+		musainSound.volume = 1.0;
+	} catch(e) {}
+	window.denisScareSound = denisScareSound;
+	window.musainSound = musainSound;
 	window.winAllInSound = winAllInSound;
 	window.winNormalSound = winNormalSound;
 	window.lossAllInSound = lossAllInSound;
@@ -249,13 +430,18 @@ async function initGame() {
 		weights[fn] = rarityToWeight(meta.rarity);
 	});
 	
-	// DEBUG: Afficher les familles une fois au chargement
+	// DEBUG: Afficher les familles et Denis une fois au chargement
 	const families = new Set();
+	let denisCount = 0;
+	let denisTotalWeight = 0;
 	imageFilenames.forEach(fn => {
 		const family = imageMetaMap[fn]?.family;
 		if (family) families.add(family);
+		if (imageMetaMap[fn]?.rarity === 0) {
+			denisCount++;
+			denisTotalWeight += weights[fn];
+		}
 	});
-	console.log('[game.js init] Familles chargées:', Array.from(families).sort());
 	// Mettre à jour l'export global
 	if (window.GameLogic) window.GameLogic.imageMetaMap = imageMetaMap;
 	if (window.SlotMachine) {
@@ -267,7 +453,7 @@ async function initGame() {
 	
 	// Charger depuis les données utilisateur et recharger depuis Firebase pour garantir la fraîcheur des données
 	if (window.userRobions !== undefined) {
-		robions = window.userRobions;
+		setRobions(window.userRobions);
 		unlockedCards = new Set(window.userUnlockedCards || []);
 		// Recharger immédiatement depuis Firebase pour avoir les dernières données
 		await reloadGameData();
@@ -327,6 +513,7 @@ async function initGame() {
 // Fonction pour initialiser avec données Firebase
 window.initGameWithUserData = function() {
 	initGame();
+	scheduleNextMusainSpawn(); // Démarrer le système auto-spawn Musain
 };
 
 // ===== DÉTECTION COMBOS =====
@@ -398,13 +585,19 @@ function updateSlotVisuals(resultArray) {
 		if (!wrap) return;
 		const col = wrap.querySelector('.slot-column');
 		if (!col) return;
-		col.classList.remove('rarity-1','rarity-2','rarity-3','rarity-4','rarity-5');
+		col.classList.remove('rarity-0','rarity-1','rarity-2','rarity-3','rarity-4','rarity-5');
 		const meta = imageMetaMap[filename];
 		const rarity = meta?.rarity || 3;
-		col.classList.add('rarity-' + rarity);
+		// Force Denis en rarity 0 si son nom contient "denis"
+		const isBenisCard = filename.includes('denis');
+		if (isBenisCard) {
+			col.classList.add('rarity-0');
+		} else {
+			col.classList.add('rarity-' + rarity);
+		}
 		col.classList.add('stopped');
 		// Appliquer la couleur de bordure selon la rareté
-		const borderColor = rarityColors[rarity] || rarityColors[1];
+		let borderColor = isBenisCard ? '#FF0000' : (rarityColors[rarity] || rarityColors[1]);
 		col.style.borderImage = `linear-gradient(135deg, ${borderColor}, ${borderColor}) 1`;
 		let overlay = col.querySelector('.neon-overlay');
 		if (!overlay) {
@@ -419,9 +612,14 @@ function updateSlotVisuals(resultArray) {
 			const raritySpan = info.querySelector('.slot-rarity');
 			if (nameSpan) nameSpan.textContent = meta?.displayName || filename;
 			if (raritySpan) {
-				const rarityNames = {1:'commun',2:'rare',3:'épique',4:'légendaire',5:'mythique'};
-				raritySpan.textContent = rarityNames[rarity] || '?';
-				raritySpan.className = 'slot-rarity rarity-' + rarity;
+				if (isBenisCard || rarity === 0) {
+					raritySpan.textContent = '';
+					raritySpan.className = 'slot-rarity rarity-0';
+				} else {
+					const rarityNames = {1:'commun',2:'rare',3:'épique',4:'légendaire',5:'mythique'};
+					raritySpan.textContent = rarityNames[rarity] || '?';
+					raritySpan.className = 'slot-rarity rarity-' + rarity;
+				}
 			}
 		}
 	});
@@ -436,6 +634,7 @@ function updateRobionsDisplay() {
 			textEl.textContent = formatNumber(robions);
 		}
 	}
+	
 	updatePlayerStats();
 	if (window.updateFarmDisplay) window.updateFarmDisplay();
 	if (window.updateMultiplierDisplay) window.updateMultiplierDisplay();
@@ -498,6 +697,17 @@ function updateGainSummary(summary) {
 		breakdown += ` + <span class="combo-bonus">${comboBonus}</span>`;
 		hasExtra = true;
 	}
+	// Ajouter le bonus musain s'il y a lieu
+	if (window.lastMusainBonus && window.lastMusainBonus > 0) {
+		breakdown += ` + <span class="musain-bonus" style="color: #FF8C00;">+${window.lastMusainBonus} 🐭</span>`;
+		hasExtra = true;
+		window.lastMusainBonus = 0; // réinitialiser après affichage
+	}
+	// Ajouter l'effet Denis (ANNULÉ) s'il y a lieu
+	if (denisEffect) {
+		breakdown += ` <span class="denis-malus" style="color: #FF0000; font-weight: bold;">ANNULÉ</span>`;
+		hasExtra = true;
+	}
 
 	// Afficher les parenthèses uniquement s'il y a des bonus/malus en plus des slots
 	if (hasExtra) {
@@ -544,34 +754,88 @@ async function applySpinResult(resultArray) {
 	const specialBonus = Math.max(0, Math.floor(baseWithCombo - baseGain));
 	const comboBonus = Math.max(0, Math.floor(baseWithComboAndStreak - baseWithCombo));
 	
-	// Si événement spécial (combo), forcer le multiplicateur de mise à minimum 1.26 pour garantir un gain
-	let stakeMultiplier = calculateStakeMultiplier(resultArray);
-	if (hasSpecialEvent && stakeMultiplier <= NEUTRAL_THRESHOLD) {
-		stakeMultiplier = 1.26;
-	}
-	const stakeResult = applyStake(bet, stakeMultiplier);
+	// Système de malus DENIS (rareté 0)
+	denisCount = resultArray.filter(fn => imageMetaMap[fn]?.rarity === 0).length;
+	denisEffect = null;
 	
-	const totalReward = baseWithComboAndStreak + stakeResult.net;
-	robions += totalReward;
+	// Déterminer si victoire/remboursement/perte basé sur somme des raretés
+	const winSum = calculateWinStatus(resultArray);
+	let stakeResult;
+	if (bet === 0) {
+		stakeResult = { refund: 0, bonus: 0, net: 0, lost: false };
+	} else if (winSum < 1) {
+		// Perte
+		stakeResult = { refund: 0, bonus: 0, net: -bet, lost: true };
+	} else if (winSum === 1) {
+		// Remboursement
+		stakeResult = { refund: bet, bonus: 0, net: 0, lost: false };
+	} else {
+		// Gain : utiliser stakeMultiplier pour déterminer le montant du gain
+		let stakeMultiplier = calculateStakeMultiplier(resultArray);
+		if (hasSpecialEvent && stakeMultiplier <= NEUTRAL_THRESHOLD) {
+			stakeMultiplier = 1.26;
+		}
+		const bonus = Math.floor(bet * stakeMultiplier);
+		stakeResult = { refund: bet, bonus, net: bonus, lost: false };
+	}
+	
+	// MALUS DENIS : annule/réduit les gains
+	if (denisCount > 0) {
+		// Jouer le son scare
+		if (window.denisScareSound) {
+			window.denisScareSound.currentTime = 0;
+			window.denisScareSound.play().catch(() => {});
+		}
+		if (denisCount === 1) {
+			// 1 Denis = perte du gain du tirage
+			denisEffect = { type: 'loss', value: baseWithComboAndStreak };
+			stakeResult.net -= baseWithComboAndStreak;
+		} else if (denisCount === 2) {
+			// 2 Denis = perte de 20% des robions globaux
+			const loss = Math.floor(robions * 0.2);
+			denisEffect = { type: 'percent', value: 20, amount: loss };
+			stakeResult.net -= loss;
+		} else if (denisCount >= 3) {
+			// 3+ Denis = perte de 40% des robions globaux
+			const loss = Math.floor(robions * 0.4);
+			denisEffect = { type: 'percent', value: 40, amount: loss };
+			stakeResult.net -= loss;
+		}
+	}
+	
+	// Appliquer le multiplicateur musain si actif
+	let totalReward = baseWithComboAndStreak + stakeResult.net;
+	let musainBonusAmount = 0; // bonus ajouté par le musain (pour l'affichage)
+	if (musainMultiplier > 1 && totalReward > 0) {
+		musainBonusAmount = Math.floor(totalReward * (musainMultiplier - 1));
+		totalReward = Math.floor(totalReward * musainMultiplier);
+	}
+	window.lastMusainBonus = musainBonusAmount; // sauvegarder pour l'affichage
+	setRobions(robions + totalReward);
 
 	// Sauvegarder la mise pour l'affichage avant réinitialisation
 	const currentBet = bet;
 	const wasAllIn = window.isAllInSpin || false;
 
 	// Jouer le son approprié selon ALL IN et résultat
-	const isWin = totalReward > 0;
+	// Victoire = gain net positif (stakeResult.net > 0), pas juste totalReward > 0
+	const isWin = stakeResult.net > 0;
+	const isRefund = stakeResult.net === 0 && currentBet > 0;
+	
 	if (wasAllIn) {
 		if (isWin && window.winAllInSound) {
 			try { window.winAllInSound.currentTime = 0; window.winAllInSound.play().catch(()=>{}); } catch(e) {}
-		} else if (!isWin && window.lossAllInSound) {
+		} else if (!isWin && !isRefund && window.lossAllInSound) {
 			try { window.lossAllInSound.currentTime = 0; window.lossAllInSound.play().catch(()=>{}); } catch(e) {}
 		}
+		// Si isRefund, aucun son
 	} else if (bet > 0) {
 		if (isWin && window.winNormalSound) {
 			try { window.winNormalSound.currentTime = 0; window.winNormalSound.play().catch(()=>{}); } catch(e) {}
-		} else if (!isWin && window.lossNormalSound) {
+		} else if (!isWin && !isRefund && window.lossNormalSound) {
 			try { window.lossNormalSound.currentTime = 0; window.lossNormalSound.play().catch(()=>{}); } catch(e) {}
 		}
+		// Si isRefund, aucun son
 	}
 
 	// ALL IN: réinitialiser la mise à 0 après le spin (gagnant ou perdant)
@@ -983,7 +1247,7 @@ function loadFromLocalStorage() {
 		const data = localStorage.getItem('gamblingGameData');
 		if (data) {
 			const parsed = JSON.parse(data);
-			robions = parsed.robions || 0;
+			setRobions(parsed.robions || 0);
 			unlockedCards = new Set(parsed.unlockedCards || []);
 			window.farmSpeedLevel = parsed.farmSpeedLevel || 0;
 			window.farmProductionLevel = parsed.farmProductionLevel || 0;
@@ -1005,12 +1269,23 @@ function loadFromLocalStorage() {
 
 // Sauvegarde Firebase (appelée manuellement ou auto toutes les 5 min)
 async function saveGameData() {
-	if (window.currentUserPseudo && window.firebaseDB) {
+	if (window.currentUserPseudo && window.firebaseDB && window.firebaseAuth) {
 		try {
+			const currentUser = window.firebaseAuth.currentUser;
+			if (!currentUser) {
+				console.warn('User not authenticated, cannot save');
+				return;
+			}
+			
+			// Arrondir les robions avant sauvegarde pour cohérence avec le classement
+			const robionsToSave = Math.floor(robions);
+			
 			const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
 			await setDoc(doc(window.firebaseDB, 'users', window.currentUserPseudo), {
+				userId: currentUser.uid,
 				pseudo: window.currentUserPseudo,
-				robions: Math.floor(robions),
+				email: currentUser.email,
+				robions: robionsToSave,
 				unlockedCards: Array.from(unlockedCards),
 				farmSpeedLevel: window.farmSpeedLevel || 0,
 				farmProductionLevel: window.farmProductionLevel || 0,
@@ -1081,7 +1356,7 @@ async function reloadGameData() {
 			if (docSnap.exists()) {
 				const userData = docSnap.data();
 				// Mettre à jour TOUTES les variables locales avec les données Firebase
-				robions = Math.floor(userData.robions || 0);
+				setRobions(Math.floor(userData.robions || 0));
 				unlockedCards = new Set(userData.unlockedCards || []);
 				window.userRobions = robions;
 				window.userUnlockedCards = userData.unlockedCards || [];
@@ -1389,6 +1664,9 @@ function unblockAllPageInteractions() {
 // ===== CONTRÔLES SPIN & MISE =====
 // ===== ALL IN FUNCTION =====
 function allIn() {
+	// Bloquer si fenêtre autoclicker warning est ouverte
+	if (!window.canSpinWithoutAutoClickWarning || !window.canSpinWithoutAutoClickWarning()) return;
+	
 	bet = robions;
 	updateBetDisplay();
 	// Enregistrer le plus gros ALL IN
@@ -1425,6 +1703,8 @@ function handleSpin() {
 	if (!window.SlotMachine) return;
 	if (isSpinning) return;
 	if (robions < bet) return;
+	// Bloquer si fenêtre autoclicker warning est ouverte
+	if (!window.canSpinWithoutAutoClickWarning || !window.canSpinWithoutAutoClickWarning()) return;
 	// Si première spin après connexion, forcer une synchronisation préalable
 	if (window.forceSyncPending && typeof forceSyncFromFirebase === 'function') {
 		window.forceSyncPending = false;
@@ -1628,6 +1908,10 @@ document.addEventListener('DOMContentLoaded', () => {
 		}
 	});
 });
+
+// ===== FONCTIONS PUBLIQUES =====
+window.spawnMusain = spawnMusain;
+window.activateMusainBoost = activateMusainBoost;
 
 // ===== EXPORT POUR DEBUG =====
 window.GameLogic = {
