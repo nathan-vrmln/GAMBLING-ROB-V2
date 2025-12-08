@@ -763,32 +763,38 @@ async function applySpinResult(resultArray) {
 	
 	// Déterminer si victoire/remboursement/perte basé sur somme des raretés
 	const winSum = calculateWinStatus(resultArray);
-	let stakeResult;
-	if (bet === 0) {
-		stakeResult = { refund: 0, bonus: 0, net: 0, lost: false };
-	} else if (hasSpecialEvent) {
-		// RÈGLE PRIORITAIRE: Si événement spécial, toujours gagner (même avec 3 communes)
-		let stakeMultiplier = calculateStakeMultiplier(resultArray);
-		// Si le multiplicateur serait une perte ou neutre, forcer à 1.26 (gain minimal)
-		if (stakeMultiplier <= NEUTRAL_THRESHOLD) {
-			stakeMultiplier = 1.26;
+	let stakeBonusNet = 0; // Gain/perte de la MISE (indépendant du tirage)
+	let stakeRefund = 0;
+	let stakeLost = false;
+	
+	if (bet > 0) {
+		if (hasSpecialEvent) {
+			// RÈGLE PRIORITAIRE: Si événement spécial, toujours gagner la mise
+			let stakeMultiplier = calculateStakeMultiplier(resultArray);
+			if (stakeMultiplier <= NEUTRAL_THRESHOLD) {
+				stakeMultiplier = 1.26;
+			}
+			stakeBonusNet = Math.floor(bet * stakeMultiplier);
+			stakeRefund = bet;
+		} else if (winSum < 1) {
+			// Perte de mise (seulement si pas d'événement spécial)
+			stakeBonusNet = -bet;
+			stakeRefund = 0;
+			stakeLost = true;
+		} else if (winSum === 1) {
+			// Remboursement de mise
+			stakeBonusNet = 0;
+			stakeRefund = bet;
+		} else {
+			// Gain normal de mise
+			let stakeMultiplier = calculateStakeMultiplier(resultArray);
+			stakeBonusNet = Math.floor(bet * stakeMultiplier);
+			stakeRefund = bet;
 		}
-		const bonus = Math.floor(bet * stakeMultiplier);
-		stakeResult = { refund: bet, bonus, net: bonus, lost: false };
-	} else if (winSum < 1) {
-		// Perte (seulement si pas d'événement spécial)
-		stakeResult = { refund: 0, bonus: 0, net: -bet, lost: true };
-	} else if (winSum === 1) {
-		// Remboursement
-		stakeResult = { refund: bet, bonus: 0, net: 0, lost: false };
-	} else {
-		// Gain normal
-		let stakeMultiplier = calculateStakeMultiplier(resultArray);
-		const bonus = Math.floor(bet * stakeMultiplier);
-		stakeResult = { refund: bet, bonus, net: bonus, lost: false };
 	}
 	
-	// MALUS DENIS : annule/réduit les gains
+	// MALUS DENIS : appliqué au gain du tirage SEULEMENT, pas la mise
+	let tirageLoss = 0;
 	if (denisCount > 0) {
 		// Jouer le son scare
 		if (window.denisScareSound) {
@@ -798,22 +804,22 @@ async function applySpinResult(resultArray) {
 		if (denisCount === 1) {
 			// 1 Denis = perte du gain du tirage
 			denisEffect = { type: 'loss', value: baseWithComboAndStreak };
-			stakeResult.net -= baseWithComboAndStreak;
+			tirageLoss = baseWithComboAndStreak;
 		} else if (denisCount === 2) {
 			// 2 Denis = perte de 20% des robions globaux
 			const loss = Math.floor(robions * 0.2);
 			denisEffect = { type: 'percent', value: 20, amount: loss };
-			stakeResult.net -= loss;
+			tirageLoss = loss;
 		} else if (denisCount >= 3) {
 			// 3+ Denis = perte de 40% des robions globaux
 			const loss = Math.floor(robions * 0.4);
 			denisEffect = { type: 'percent', value: 40, amount: loss };
-			stakeResult.net -= loss;
+			tirageLoss = loss;
 		}
 	}
 	
-	// Appliquer le multiplicateur musain si actif
-	let totalReward = baseWithComboAndStreak + stakeResult.net;
+	// Total = gain du tirage (avec malus Denis) + gain/perte de mise
+	let totalReward = (baseWithComboAndStreak - tirageLoss) + stakeBonusNet;
 	let musainBonusAmount = 0; // bonus ajouté par le musain (pour l'affichage)
 	if (musainMultiplier > 1 && totalReward > 0) {
 		musainBonusAmount = Math.floor(totalReward * (musainMultiplier - 1));
@@ -827,9 +833,9 @@ async function applySpinResult(resultArray) {
 	const wasAllIn = window.isAllInSpin || false;
 
 	// Jouer le son approprié selon ALL IN et résultat
-	// Victoire = gain net positif (stakeResult.net > 0), pas juste totalReward > 0
-	const isWin = stakeResult.net > 0;
-	const isRefund = stakeResult.net === 0 && currentBet > 0;
+	// Victoire = gain net positif (stakeBonusNet > 0), pas juste totalReward > 0
+	const isWin = stakeBonusNet > 0;
+	const isRefund = stakeBonusNet === 0 && currentBet > 0;
 	
 	if (wasAllIn) {
 		if (isWin && window.winAllInSound) {
@@ -914,6 +920,14 @@ async function applySpinResult(resultArray) {
 		window.userUnlockedCards = Array.from(unlockedCards);
 		// Marquer qu'on vient de débloquer des cartes (pour éviter reload prématuré)
 		window.lastUnlockTime = Date.now();
+		// Sauvegarder immédiatement les débloquages (pas de debounce)
+		if (window.saveGameData) {
+			try {
+				await window.saveGameData();
+			} catch (e) {
+				console.warn('Emergency save for new unlocks failed:', e);
+			}
+		}
 	}
 	
 	// Jouer le son de famille complète si applicable
