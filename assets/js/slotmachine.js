@@ -20,19 +20,12 @@
 	function setImages(list) {
 		images = Array.isArray(list) ? list.slice() : [];
 		__weightCache = null; // Invalider cache
-		console.log('[SlotMachine] setImages: chargé', images.length, 'images');
-		// Vérifier Denis
-		const hasDenis = images.some(name => name === 'denis 0.png');
-		if (hasDenis) console.log('[SlotMachine] ✓ Denis trouvé dans la liste!');
 		preloadImages();
 	}
 
 	function setImageWeights(map) {
 		weights = map || null;
 		__weightCache = null; // Invalider cache
-		if (weights && weights['denis 0.png'] !== undefined) {
-			console.log('[SlotMachine] Denis poids:', weights['denis 0.png']);
-		}
 	}
 
 	function preloadImages() {
@@ -62,37 +55,18 @@
 				const w = Math.max(0, weights[name] || 0);
 				__weightCache += w;
 			}
-			console.log('[SlotMachine] pickRandom: poids total calculé =', __weightCache);
 		}
 		
 		let total = __weightCache;
-		if (total <= 0) {
-			console.warn('[SlotMachine] pickRandom: poids total <= 0, fallback aléatoire');
-			return images[Math.floor(Math.random() * images.length)];
-		}
+		if (total <= 0) return images[Math.floor(Math.random() * images.length)];
 		
 		let r = Math.random() * total;
-		let picked = null;
 		for (const name of images) {
 			const w = Math.max(0, weights[name] || 0);
-			if (r < w) {
-				picked = name;
-				break;
-			}
+			if (r < w) return name;
 			r -= w;
 		}
-		
-		if (!picked) {
-			console.warn('[SlotMachine] pickRandom: pas de carte trouvée, fallback dernière');
-			picked = images[images.length - 1];
-		}
-		
-		// Log Denis quand il est tiré
-		if (picked === 'denis 0.png') {
-			console.log('[SlotMachine] 🎰 DENIS TIRÉ!');
-		}
-		
-		return picked;
+		return images[images.length - 1];
 	}
 
 	function applyImageToColumn(col, filename) {
@@ -133,7 +107,7 @@
 				displayName = meta.displayName || filename;
 				rarity = meta.rarity || 1;
 				family = meta.family || null;
-				const rarityNames = {0:'DENIS',1:'commun',2:'rare',3:'épique',4:'légendaire',5:'mythique'};
+				const rarityNames = {1:'commun',2:'rare',3:'épique',4:'légendaire',5:'mythique'};
 				rarityLabel = rarityNames[rarity] || 'commun';
 			}
 		} catch(e) {

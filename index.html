@@ -20,9 +20,8 @@
 		<div class="auth-modal">
 			<div id="auth-error" class="auth-error" style="display:none;"></div>
 			<form id="auth-form" autocomplete="off">
-				<input type="email" id="auth-email" name="email" placeholder="Email" required autocomplete="email" style="display:none;" />
-				<input type="text" id="auth-pseudo" name="pseudo" placeholder="Pseudo" required minlength="3" maxlength="20" autocomplete="off" />
-				<input type="password" id="auth-password" name="password" placeholder="Mot de passe" required minlength="6" autocomplete="new-password" />
+				<input type="text" id="auth-pseudo" placeholder="Pseudo" required minlength="3" maxlength="20" autocomplete="off" />
+				<input type="password" id="auth-password" placeholder="Mot de passe" required minlength="6" autocomplete="new-password" />
 				<button type="submit" id="auth-submit">Se connecter</button>
 			</form>
 			<div class="auth-toggle">
@@ -34,10 +33,7 @@
 
 	<!-- Contenu du jeu (caché jusqu'à connexion) -->
 	<div id="game-content" style="display:none;">
-	<div style="position: fixed; top: 0; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 30px; padding: 15px 20px; z-index: 100;">
-		<div id="musain-timer" style="display: none; background: linear-gradient(135deg, #FF8C00, #FFB347); padding: 10px 20px; border-radius: 8px; color: white; font-weight: bold; font-size: 18px; border: 2px solid #FF6347; box-shadow: 0 0 15px rgba(255, 140, 0, 0.8); white-space: nowrap;">×2 20s</div>
-		<header id="robions-display" style="display: flex; align-items: center; gap: 8px;"><span class="robions-text">100</span><img src="assets/images/robion.png" alt="Robion" class="robion-logo"></header>
-	</div>
+	<header id="robions-display"><span class="robions-text">100</span><img src="assets/images/robion.png" alt="Robion" class="robion-logo"></header>
 	<div id="last-result" style="display:none;"></div>
 	<div id="player-stats" class="player-stats"></div>
 	
@@ -166,7 +162,6 @@
 	<script type="module">
 		import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 		import { getFirestore, collection, doc, getDoc, setDoc, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-		import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
 		// Configuration Firebase
 		const firebaseConfig = {
@@ -180,9 +175,7 @@
 
 		const app = initializeApp(firebaseConfig);
 		const db = getFirestore(app);
-		const auth = getAuth(app);
 		window.firebaseDB = db;
-		window.firebaseAuth = auth;
 
 		// Démarrer la musique de fond
 		const bgm = document.getElementById('bgm');
@@ -295,66 +288,20 @@
 		let isRegisterMode = false;
 		let isSubmitting = false;
 
-		// Initialiser l'écran d'authentification au lancement
-		function initAuthScreen() {
-			isRegisterMode = false;
-			const overlay = document.getElementById('auth-overlay');
-			const emailField = document.getElementById('auth-email');
-			overlay.classList.remove('register-mode');
-			emailField.style.display = 'block';
-			emailField.required = false;
-			emailField.placeholder = 'Email (optionnel si déjà inscrit sur cet appareil)';
-			document.getElementById('auth-submit').textContent = 'Se connecter';
-			document.getElementById('auth-toggle-text').textContent = 'Pas de compte ?';
-			document.getElementById('auth-toggle-link').textContent = 'Créer un compte';
-			document.getElementById('auth-error').style.display = 'none';
-			document.getElementById('auth-form').reset();
-		}
-
-		// Afficher l'overlay au démarrage
-		initAuthScreen();
-		document.getElementById('auth-overlay').style.display = 'flex';
-		document.getElementById('game-content').style.display = 'none';
-
-		// Listener d'état d'authentification Firebase
-		onAuthStateChanged(auth, async (user) => {
-			if (user) {
-				// Utilisateur connecté: charger son pseudo depuis localStorage
-				const savedPseudo = localStorage.getItem('currentUserPseudo');
-				if (savedPseudo) {
-					try {
-						const userDoc = await getDoc(doc(db, 'users', savedPseudo));
-						if (userDoc.exists() && userDoc.data().userId === user.uid) {
-							loadUserData(userDoc.data(), savedPseudo);
-						} else {
-							// Document inexistant ou UID ne correspond pas
-							localStorage.removeItem('currentUserPseudo');
-							initAuthScreen();
-							document.getElementById('auth-overlay').style.display = 'flex';
-							document.getElementById('game-content').style.display = 'none';
-						}
-					} catch (error) {
-						console.error('Error loading user data:', error);
+		// Désactivé: auto-connexion depuis localStorage (l'utilisateur doit se connecter manuellement)
+		const AUTO_LOGIN = false;
+		if (AUTO_LOGIN) {
+			const currentUser = localStorage.getItem('currentUserPseudo');
+			if (currentUser) {
+				getDoc(doc(db, 'users', currentUser)).then(docSnap => {
+					if (docSnap.exists()) {
+						loadUserData(docSnap.data(), currentUser);
+					} else {
 						localStorage.removeItem('currentUserPseudo');
-						initAuthScreen();
-						document.getElementById('auth-overlay').style.display = 'flex';
-						document.getElementById('game-content').style.display = 'none';
 					}
-				} else {
-					// Pas de pseudo sauvegardé, afficher écran de connexion
-					initAuthScreen();
-					document.getElementById('auth-overlay').style.display = 'flex';
-					document.getElementById('game-content').style.display = 'none';
-				}
-			} else {
-				// Utilisateur déconnecté
-				localStorage.removeItem('currentUserPseudo');
-				initAuthScreen();
-				// Afficher le formulaire de connexion
-				document.getElementById('auth-overlay').style.display = 'flex';
-				document.getElementById('game-content').style.display = 'none';
+				}).catch(() => localStorage.removeItem('currentUserPseudo'));
 			}
-		});
+		}
 
 		// Fonction de chargement des données utilisateur
 		function loadUserData(userData, pseudo) {
@@ -380,20 +327,13 @@
 			e.preventDefault();
 			isRegisterMode = !isRegisterMode;
 			const overlay = document.getElementById('auth-overlay');
-			const emailField = document.getElementById('auth-email');
 			if (isRegisterMode) {
 				overlay.classList.add('register-mode');
-				emailField.style.display = 'block';
-				emailField.required = true;
 				document.getElementById('auth-submit').textContent = "S'inscrire";
 				document.getElementById('auth-toggle-text').textContent = 'Déjà un compte ?';
 				document.getElementById('auth-toggle-link').textContent = 'Se connecter';
 			} else {
 				overlay.classList.remove('register-mode');
-				// Afficher le champ email en mode connexion aussi (optionnel si email en cache)
-				emailField.style.display = 'block';
-				emailField.required = false;
-				emailField.placeholder = 'Email (optionnel si déjà inscrit sur cet appareil)';
 				document.getElementById('auth-submit').textContent = 'Se connecter';
 				document.getElementById('auth-toggle-text').textContent = 'Pas de compte ?';
 				document.getElementById('auth-toggle-link').textContent = 'Créer un compte';
@@ -407,105 +347,36 @@
 			if (isSubmitting) return;
 			isSubmitting = true;
 
-			const email = document.getElementById('auth-email').value.trim();
 			const pseudo = document.getElementById('auth-pseudo').value.trim().toLowerCase();
 			const password = document.getElementById('auth-password').value;
 			const errorEl = document.getElementById('auth-error');
 
 			try {
 				if (isRegisterMode) {
-					// Validation
+					const userDoc = await getDoc(doc(db, 'users', pseudo));
+					if (userDoc.exists()) throw new Error('Ce pseudo est déjà utilisé');
 					if (pseudo.length < 3 || pseudo.length > 20) throw new Error('Le pseudo doit contenir entre 3 et 20 caractères');
 					if (password.length < 6) throw new Error('Le mot de passe doit contenir au moins 6 caractères');
 					
-					// Créer le compte Firebase Auth d'abord (requis pour accéder à Firestore)
-					let userCredential;
-					try {
-						userCredential = await createUserWithEmailAndPassword(auth, email, password);
-					} catch (authError) {
-						// Si l'email existe déjà, Firebase Auth va bloquer ici
-						if (authError.code === 'auth/email-already-in-use') {
-							throw new Error('Cette adresse email est déjà utilisée');
-						}
-						throw authError;
-					}
-					
-					const userId = userCredential.user.uid;
-					
-					// Maintenant qu'on est authentifié, vérifier si le pseudo est déjà utilisé
-					const pseudoDoc = await getDoc(doc(db, 'users', pseudo));
-					if (pseudoDoc.exists()) {
-						// Si le pseudo existe, supprimer le compte Auth qu'on vient de créer
-						await userCredential.user.delete();
-						throw new Error('Ce pseudo est déjà utilisé');
-					}
-					
-					// Créer le document utilisateur dans Firestore avec userId
-					await setDoc(doc(db, 'users', pseudo), {
-						userId: userId,
-						pseudo: pseudo,
-						email: email,
-						robions: 0,
-						unlockedCards: [],
-						farmSpeedLevel: 0,
-						farmProductionLevel: 0,
-						multiplierLevel: 0,
-						robcoinBalance: 0,
+						await setDoc(doc(db, 'users', pseudo), {
+					pseudo, password, robions: 0, unlockedCards: [],
+					farmSpeedLevel: 0, farmProductionLevel: 0,
+					multiplierLevel: 0, robcoinBalance: 0,
 						createdAt: new Date().toISOString()
 					});
-					
-					// Sauvegarder l'email localement pour les reconnexions futures
-					localStorage.setItem(`email_${pseudo}`, email);
 					localStorage.setItem('currentUserPseudo', pseudo);
-					loadUserData({ 
-						robions: 0, 
-						unlockedCards: [], 
-						farmSpeedLevel: 0, 
-						farmProductionLevel: 0, 
-						multiplierLevel: 0, 
-						robcoinBalance: 0 
-					}, pseudo);
-					
+					loadUserData({ robions: 0, unlockedCards: [], farmSpeedLevel: 0, farmProductionLevel: 0, multiplierLevel: 0, robcoinBalance: 0 }, pseudo);
 				} else {
-					// Connexion: priorité à l'email fourni, sinon chercher en cache
-					let emailToUse = email.trim();
-					
-					if (!emailToUse) {
-						// Pas d'email fourni, chercher en cache
-						const savedEmail = localStorage.getItem(`email_${pseudo}`);
-						if (!savedEmail) {
-							throw new Error('Email requis. Si vous vous connectez depuis un nouvel appareil, veuillez saisir votre email.');
-						}
-						emailToUse = savedEmail;
-					}
-					
-					// Se connecter avec Firebase Auth
-					await signInWithEmailAndPassword(auth, emailToUse, password);
-					
-					// Maintenant qu'on est authentifié, charger les données Firestore
 					const userDoc = await getDoc(doc(db, 'users', pseudo));
-					if (!userDoc.exists()) throw new Error('Compte introuvable');
-					
+					if (!userDoc.exists()) throw new Error('Pseudo ou mot de passe incorrect');
 					const userData = userDoc.data();
+					if (userData.password !== password) throw new Error('Pseudo ou mot de passe incorrect');
 					
-					// Sauvegarder l'email pour les prochaines connexions
-					localStorage.setItem(`email_${pseudo}`, emailToUse);
 					localStorage.setItem('currentUserPseudo', pseudo);
 					loadUserData(userData, pseudo);
 				}
 			} catch (error) {
-				let errorMsg = error.message;
-				// Messages Firebase Auth en français
-				if (errorMsg.includes('auth/email-already-in-use')) {
-					errorMsg = 'Cette adresse email est déjà utilisée';
-				} else if (errorMsg.includes('auth/invalid-email')) {
-					errorMsg = 'Adresse email invalide';
-				} else if (errorMsg.includes('auth/weak-password')) {
-					errorMsg = 'Le mot de passe doit contenir au moins 6 caractères';
-				} else if (errorMsg.includes('auth/user-not-found') || errorMsg.includes('auth/wrong-password') || errorMsg.includes('auth/invalid-credential')) {
-					errorMsg = 'Pseudo ou mot de passe incorrect';
-				}
-				errorEl.textContent = errorMsg;
+				errorEl.textContent = error.message;
 				errorEl.style.display = 'block';
 			} finally {
 				isSubmitting = false;
@@ -535,18 +406,8 @@
 			});
 		}
 
-		document.getElementById('logout-btn').addEventListener('click', async () => {
+		document.getElementById('logout-btn').addEventListener('click', () => {
 			if (confirm('Voulez-vous vraiment vous déconnecter ?')) {
-				try {
-					// Arrêter le système de musain
-					if (typeof window.stopMusainSpawner === 'function') {
-						window.stopMusainSpawner();
-					}
-					// Déconnexion de Firebase Auth
-					await auth.signOut();
-				} catch (error) {
-					console.error('Logout error:', error);
-				}
 				localStorage.removeItem('currentUserPseudo');
 				window.currentUserPseudo = null;
 				window.userRobions = null;
@@ -721,7 +582,7 @@
 			const getUpgradeCost = (level) => Math.floor(FARM_BASE_COST * Math.pow(1.3, level));
 			const getRobions = () => window.robions || 0;
 			const setRobions = (value) => { window.robions = value; };
-			const isFarmActive = () => ((window.farmSpeedLevel || 0) > 0 || (window.farmProductionLevel || 0) > 0);
+			const isFarmActive = () => ((window.farmSpeedLevel || 0) > 0 || (window.farmProductionLevel || 0) > 0) && !!window.hasDoneFirstSpin;
 			
 			function showRobionsGain(amount) {
 				const gainEl = document.createElement('div');
@@ -814,11 +675,7 @@
 					if (window.updateRobionsDisplay) window.updateRobionsDisplay();
 					if (window.saveGameData) window.saveGameData();
 					updateFarmDisplay();
-					// Si c'est le premier upgrade, lancer la ferme immédiatement
-					if (!farmInterval && isFarmActive()) {
-						startFarmProgress();
-					}
-					// Ne pas relancer la ferme si elle tourne déjà, laisser le cycle actuel continuer
+					// Ne pas relancer la ferme, laisser le cycle actuel continuer
 				}
 			});
 			
@@ -828,17 +685,13 @@
 					setRobions(getRobions() - cost);
 					window.farmProductionLevel = (window.farmProductionLevel || 0) + 1;
 					farmProductionLevel = window.farmProductionLevel;
-					window.farmProductionLevel = farmProductionLevel;
-					if (window.updateRobionsDisplay) window.updateRobionsDisplay();
-					if (window.saveGameData) window.saveGameData();
-					updateFarmDisplay();
-					// Si c'est le premier upgrade, lancer la ferme immédiatement
-					if (!farmInterval && isFarmActive()) {
-						startFarmProgress();
-					}
-					// Ne pas relancer la ferme si elle tourne déjà, laisser le cycle actuel continuer
-				}
-			});			// Hook pour reset lors du rechargement utilisateur
+				window.farmProductionLevel = farmProductionLevel;
+				if (window.updateRobionsDisplay) window.updateRobionsDisplay();
+				if (window.saveGameData) window.saveGameData();
+				updateFarmDisplay();
+				// Ne pas relancer la ferme, laisser le cycle actuel continuer
+			}
+		});			// Hook pour reset lors du rechargement utilisateur
 			window.resetFarmStateOnUserReload = function() {
 				stopFarmProgress();
 				farmSpeedLevel = window.farmSpeedLevel || 0;
@@ -970,14 +823,9 @@
 		const CLICK_THRESHOLD = 6; // 6 clics
 		const TIME_WINDOW = 1000; // dans 1 seconde = impossible humainement
 		
-		// Détection de régularité (autoclicker lent)
-		let clickIntervals = [];
-		const REGULARITY_THRESHOLD = 50; // ms - variance max pour pattern suspect
-		const INTERVAL_SAMPLE_SIZE = 5; // analyser les 5 derniers intervalles
-		
 		// État anti-cheat global
 		window.antiCheatState = {
-			blockNextAction: false
+			autoClickDetected: false
 		};
 		
 		function isAutoClickerPattern() {
@@ -985,22 +833,7 @@
 			clickHistory.push(now);
 			// Garder seulement les clics des dernière seconde
 			clickHistory = clickHistory.filter(t => now - t < TIME_WINDOW);
-			console.log(`[Anti-Cheat] Clics en 1s: ${clickHistory.length}/${CLICK_THRESHOLD}`);
 			return clickHistory.length >= CLICK_THRESHOLD;
-		}
-		
-		function isRegularPattern() {
-			if (clickIntervals.length < INTERVAL_SAMPLE_SIZE) return false;
-			
-			// Calculer variance des derniers intervalles
-			const recent = clickIntervals.slice(-INTERVAL_SAMPLE_SIZE);
-			const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-			const variance = recent.reduce((sum, val) => sum + Math.abs(val - avg), 0) / recent.length;
-			
-			console.log(`[Anti-Cheat] Variance: ${variance.toFixed(0)}ms (seuil: ${REGULARITY_THRESHOLD}ms)`);
-			
-			// Si variance trop faible = clics trop réguliers = autoclicker
-			return variance < REGULARITY_THRESHOLD && avg > 400 && avg < 2000;
 		}
 		
 		function showAutoClickWarning() {
@@ -1027,7 +860,7 @@
 			modal.innerHTML = `
 				<div style="margin-bottom: 20px; font-size: 28px;">⚠️</div>
 				<div style="margin-bottom: 30px;">Suspicion d'auto click</div>
-				<button onclick="document.getElementById('autoclicker-warning').remove(); clickIntervals = [];" style="
+				<button onclick="document.getElementById('autoclicker-warning').remove()" style="
 					padding: 12px 30px;
 					font-size: 16px;
 					background: white;
@@ -1043,58 +876,52 @@
 			`;
 			
 			document.body.appendChild(modal);
+			window.antiCheatState.autoClickDetected = false;
 		}
 		
-		// Tracker TOUS les clics sur le document
-		document.addEventListener('click', function(e) {
+		function blockAutoClicker(e) {
 			const now = Date.now();
-			const isGameButton = e.target.id === 'spin-button' || e.target.id === 'all-in-button';
 			
-			if (isGameButton) {
-				// Enregistrer l'intervalle entre clics
-				if (lastClickTime > 0) {
-					const interval = now - lastClickTime;
-					clickIntervals.push(interval);
-					// Garder seulement les 10 derniers
-					if (clickIntervals.length > 10) clickIntervals.shift();
-				}
-				
-				// Vérif 1: Rate limit minimum
-				if (now - lastClickTime < MIN_CLICK_INTERVAL) {
-					e.preventDefault();
-					e.stopPropagation();
-					console.log('[Anti-Cheat] Clic bloqué - trop rapide');
-					return false;
-				}
-				
-				// Vérif 2: Pattern rapide
-				if (isAutoClickerPattern()) {
-					e.preventDefault();
-					e.stopPropagation();
-					console.log('[Anti-Cheat] Pattern rapide détecté');
-					showAutoClickWarning();
-					return false;
-				}
-				
-				// Vérif 3: Régularité suspecte (autoclicker lent)
-				if (isRegularPattern()) {
-					e.preventDefault();
-					e.stopPropagation();
-					console.log('[Anti-Cheat] Régularité anormale détectée');
-					showAutoClickWarning();
-					return false;
-				}
+			// Vérif 1: Rate limit minimum
+			if (now - lastClickTime < MIN_CLICK_INTERVAL) {
+				e.preventDefault();
+				return false;
+			}
+			
+			// Vérif 2: Pattern detection
+			if (isAutoClickerPattern()) {
+				e.preventDefault();
+				window.antiCheatState.autoClickDetected = true;
+				showAutoClickWarning();
+				return false;
 			}
 			
 			lastClickTime = now;
-		}, true); // Capture phase pour intercept avant
+			return true;
+		}
 		
 		// Vérifier avant chaque spin si modal autoclicker est ouvert
 		function canSpinWithoutAutoClickWarning() {
 			return !document.getElementById('autoclicker-warning');
 		}
 		
-		window.canSpinWithoutAutoClickWarning = canSpinWithoutAutoClickWarning;
+		// Attacher aux boutons SPIN et ALL IN
+		document.addEventListener('DOMContentLoaded', function() {
+			const spinBtn = document.getElementById('spin-button');
+			const allInBtn = document.getElementById('all-in-button');
+			
+			if (spinBtn) {
+				spinBtn.addEventListener('click', function(e) {
+					if (!blockAutoClicker(e)) return;
+				}, { capture: true });
+			}
+			
+			if (allInBtn) {
+				allInBtn.addEventListener('click', function(e) {
+					if (!blockAutoClicker(e)) return;
+				}, { capture: true });
+			}
+		});
 	</script>
 
 	<script src="assets/js/slotmachine.js"></script>
